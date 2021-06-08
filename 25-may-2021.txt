@@ -1,0 +1,165 @@
+##25 DE MAYO, 2021
+##Tutorial de QIIME2
+##Para este tutorial, seguiré el ejemplo de "Fecal microbial transplant (FMT study: an exercise"
+##Disponible en: https://docs.qiime2.org/2021.4/tutorials/fmt/
+###Creación de un directorio
+mkdir qiime2-fmt-tutorial
+cd qiime2-fmt-tutorial
+##Descarga de los metadatos
+curl -sL "https://data.qiime2.org/2021.4/tutorials/fmt/sample_metadata.tsv" > "sample-metadata.tsv"
+##Descarga de datos (versión 1%)
+curl -sL "https://data.qiime2.org/2021.4/tutorials/fmt/fmt-tutorial-demux-1-1p.qza" > "fmt-tutorial-demux-1.qza"
+curl -sL "https://data.qiime2.org/2021.4/tutorials/fmt/fmt-tutorial-demux-2-1p.qza" > "fmt-tutorial-demux-2.qza"
+##Demultiplezación, control de calidad
+qiime demux summarize --i-data fmt-tutorial-demux-1.qza --o-visualization demux-summary-1.qza
+qiime demux summarize --i-data fmt-tutorial-demux-2.qza --o-visualization demux-summary-2.qza
+##Subir a github
+cd $HOME/test
+cp ../qiime2-fmt-tutorial/demux-summary-*.qza .
+git status
+git add .
+git commit -m "All files uploaded"
+git push origin tutorialfecal
+##Control de calidad, trimeo
+cd ../qiime2-fmt-tutorial
+qiime dada2 denoise-single --p-trim-left 13 --p-trunc-len 150 --i-demultiplexed-seqs fmt-tutorial-demux-1.qza \
+--o-representative-sequences rep-seqs-1.qza --o-table table-1.qza --o-denoising-stats stats-1.qza
+qiime dada2 denoise-single --p-trim-left 13 --p-trunc-len 150 --i-demultiplexed-seqs fmt-tutorial-demux-2.qza \
+--o-representative-sequences rep-seqs-2.qza --o-table table-2.qza --o-denoising-stats stats-2.qza
+##Visualizar estadisticas de denoiseo
+qiime metadata tabulate --m-input-file stats-1.qza --o-visualization denoising-stats-1.qzv
+qiime metadata tabulate --m-input-file stats-2.qza --o-visualization denoising-stats-2.qzv
+##Fusionar datos denoiseados
+##3 minutos
+qiime feature-table merge --i-tables table-1.qza --i-tables table-2.qza --o-merged-table table.qza
+##75 s
+qiime feature-table merge-seqs --i-data rep-seqs-1.qza --i-data rep-seqs-2.qza --o-merged-data rep-seqs.qza
+##Crear un resumen
+#3 minutos
+qiime feature-table summarize --i-table table.qza --o-visualization table.qzv \ 
+--m-sample-metadata-file sample-metadata.tsv
+qiime feature-table tabulate-seqs --i-data rep-seqs.qza --o-visualization rep-seqs.qzv
+##FIN DEL TUTORIAL I
+######
+##II: Entrenar referencia (Basado en el tutorial Training feature)
+#Descargar secuencias (de Moving Pictures)
+curl -sL "https://data.qiime2.org/2021.4/tutorials/training-feature-classifiers/85_otus.fasta" > "85_otus.fasta"
+curl -sL "https://data.qiime2.org/2021.4/tutorials/training-feature-classifiers/85_otu_taxonomy.txt" > \
+"85_otu_taxonomy.txt"
+curl -sL "https://data.qiime2.org/2021.4/tutorials/training-feature-classifiers/rep-seqs.qza" > "rep-seqs.qza"
+#Importar al environment
+#2 minutos
+qiime tools import --type 'FeatureData[Sequence]' --input-path 85_otus.fasta --output-path 85_otus.qza
+#50 segs
+qiime tools import --type 'FeatureData[Taxonomy]' --input-format HeaderlessTSVTaxonomyFormat \
+--input-path 85_otu_taxonomy.txt --output-path ref-taxonomy.qza
+##Extraer la referencia de interes
+##6 minutos
+qiime feature-classifier extract-reads --i-sequences 85_otus.qza --p-f-primer GTGCCAGCMGCCGCGGTAA \
+--p-r-primer GGACTACHVGGGTWTCTAAT --p-trunc-len 120 --p-min-length 100 --p-max-length 400 --o-reads ref-seqs.qza
+##Entrenar la referencia
+##2 minutos
+qiime feature-classifier fit-classifier-naive-bayes --i-reference-reads ref-seqs.qza \ 
+--i-reference-taxonomy ref-taxonomy.qza --o-classifier classifier.qza
+##Probar el clasificador
+##2 minutos
+qiime feature-classifier classify-sklearn --i-classifier classifier.qza --i-reads rep-seqs.qza \
+--o-classification taxonomy.qza
+##Agregar metadata
+##60 segundos
+qiime metadata tabulate --m-input-file taxonomy.qza --o-visualization taxonomy.qzv 
+·##F DEL TUTORIAL 2
+##########
+##TUTORIAL 3
+##ANALISIS DE DIVERSIDAD
+##Preparar datos
+curl -sL "https://data.qiime2.org/2021.4/tutorials/moving-pictures/sample_metadata.tsv" > "sample-metadata.tsv"
+mkdir em-se-seqs
+curl -sL "https://data.qiime2.org/2021.4/tutorials/moving-pictures/emp-single-end-sequences/barcodes.fastq.gz" > \
+  "em-se-seqs/barcodes.fastq.gz"
+curl -sL "https://data.qiime2.org/2021.4/tutorials/moving-pictures/emp-single-end-sequences/sequences.fastq.gz" > \
+  "em-se-seqs/sequences.fastq.gz"
+qiime tools import --type EMPSingleEndSequences --input-path em-se-seqs --output-path emp-se-seqs.qza
+##Revisar que se importe correctamente
+qiime tools peek emp-se-seqs.qza
+##UUID: 8ba00b79-1159-4c1f-81cc-5204b5903618
+##Type: EMPSingleEndSequences
+##Data format: EMPSingleEndDirFmt
+##Demultiplexeo
+##10 mins.
+qiime demux emp-single --i-seqs emp-se-seqs.qza --m-barcodes-file sample-metadata.tsv \
+--m-barcode-column barcode-sequence --o-per-sample-sequences demux.qza \ 
+--o-error-correction-details demux-details.qza
+##2 mins.
+qiime demux summarize --i�-data demux.qza --o-visualization demux.qzv
+##QC
+##7 mins
+qiime dada2 denoise-single --i-demultiplexed-seqs demux.qza --p-trim-left 0 --p-trunc-len 120 \
+--o-representative-sequences rep-seqs.qza --o-table table.qza --o-denoising-stats stats-dada2.qza
+qiime metadata tabulate --m-input-file stats-dada2.qza --o-visualization stats-dada2.qzv
+##Sumarios
+##90 segs.
+qiime feature-table summarize --i-table table.qza --o-visualization table.qzv \
+--m-sample-metadata-file sample-metadata.tsv
+##60 segs.
+qiime feature-table tabulate-seqs --i-data rep-seqs.qza --o-visualization rep-seqs.qzv 
+##Generar filogenia
+##2 mins.
+qiime phylogeny align-to-tree-mafft-fasttree --i-sequences rep-seqs.qza --o-alignment aligned-rep-seqs.qza \
+--o-masked-alignment masked-aligned-rep-seqs.qza --o-tree unrooted-tree.qza --o-rooted-tree rooted-tree.qza
+##Diversidad alfa y beta
+##90 segs
+qiime diversity core-metrics-phylogenetic --i-phylogeny rooted-tree.qza --i-table table.qza --p-sampling-depth 1103 \
+--m-metadata-file sample-metadata.tsv --output-dir core-metrics-results
+##60 segs
+qiime diversity alpha-group-significance --i-alpha-diversity core-metrics-results/faith_pd_vector.qza \
+--m-metadata-file sample-metadata.tsv --o-visualization core-metrics-results/faith-pd-group-significance.qzv
+##30 segs
+qiime diversity alpha-group-significance --i-alpha-diversity core-metrics-results/evenness_vector.qza \
+--m-metadata-file sample-metadata.tsv --o-visualization core-metrics-results/evenness-group-significance.qzv
+##30 segs
+qiime diversity beta-group-significance \ 
+--i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+--m-metadata-file sample-metadata.tsv --m-metadata-column body-site \
+--o-visualization core-metrics-results/unweighted-unifrac-body-site-significance.qzv --p-pairwise
+##60 segs
+qiime diversity beta-group-significance \
+--i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+--m-metadata-file sample-metadata.tsv --m-metadata-column subject \
+--o-visualization core-metrics-results/unweighted-unifrac-subject-group-significance.qzv --p-pairwise
+##60 segs
+qiime emperor plot --i-pcoa core-metrics-results/unweighted_unifrac_pcoa_results.qza \
+--m-metadata-file sample-metadata.tsv --p-custom-axes days-since-experiment-start \
+--o-visualization core-metrics-results/unweighted-unifrac-emperor-days-since-experiment-start.qzv
+##30 segs
+qiime emperor plot --i-pcoa core-metrics-results/bray_curtis_pcoa_results.qza --m-metadata-file sample-metadata.tsv \
+--p-custom-axes days-since-experiment-start \ 
+--o-visualization core-metrics-results/bray-curtis-emperor-days-since-experiment-start.qzv
+##Rarefracci�on:4 mins
+qiime diversity alpha-rarefaction --i-table table.qza --i-phylogeny rooted-tree.qza --p-max-depth 4000 \
+--m-metadata-file sample-metadata.tsv --o-visualization alpha-rarefaction.qzv
+##Analisis taxonomico: Tuve que entrenar de nuevo a la base (desde GG 99)
+##10 mins
+qiime feature-classifier classify-sklearn --i-classifier gg-13-8-99-515-806-nb-classifier.qza \
+--i-reads rep-seqs.qza --o-classification taxonomy.qza
+##2 mins
+qiime metadata tabulate --m-input-file taxonomy.qza --o-visualization taxonomy.qzv
+##60 segs
+qiime taxa barplot --i-table table.qza --i-taxonomy taxonomy.qza --m-metadata-file sample-metadata.tsv \
+--o-visualization taxa-bar-plots.qzv
+##ANCOM
+##3 mins
+qiime feature-table filter-samples --i-table table.qza --m-metadata-file sample-metadata.tsv \
+--p-where "[body-site]='gut'" --o-filtered-table gut-table.qza
+##8 mins
+qiime composition add-pseudocount --i-table gut-table.qza --o-composition-table comp-gut-table.qza
+##2 mins
+qiime composition ancom --i-table comp-gut-table.qza --m-metadata-file sample-metadata.tsv \
+--m-metadata-column subject --o-visualization ancom-subject.qzv
+##60 segs
+qiime taxa collapse --i-table gut-table.qza --i-taxonomy taxonomy.qza --p-level 6 --o-collapsed-table gut-table-16.qza
+##60 segs
+qiime composition add-pseudocount --i-table gut-table-16.qza --o-composition-table comp-gut-table-16.qza
+##30 segs
+qiime composition ancom --i-table comp-gut-table-16.qza --m-metada-file sample-metadata.tsv \
+--m-metadata-column subject --o-visualization 16-ancom-subject.qzv
