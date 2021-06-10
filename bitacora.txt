@@ -1,0 +1,137 @@
+##Descarga de los archivos
+##Cree un archivo con la lista de corridas de interes ('SraAccList.txt')
+nano SraAccList.txt
+##Hice un directorio para descargar los archivos
+mkdir ./corridas
+##Descargué los fastq demuxeado (Aprox. 6 min, 68 archivos pe)
+cat SraAccList.txt | xargs /app/sratoolkit.2.10.5-centos_linux64/bin/fasterq-dump --outdir ./corridas/
+##Debido a que algunos son SE, sólo utilizar�lecturas Fwd
+mkdir se_seqs
+cd se_seqs
+cp ../corridas/* .
+rm ./*_2.fastq
+##Las regiones que incluirían a todo son 515F y 805R, por lo que usaré la r. SILVA 138 NR99 515F/806R
+cd ../SILVA_ref
+curl -sL "https://data.qiime2.org/2021.4/common/silva-138-99-seqs-515-806.qza" > "SILVA_seqs.qza"
+curl -sL "https://data.qiime2.org/2021.4/common/silva-138-99-tax-515-806.qza" > "SILVA_taxo.qza"
+cd ../se_seqs
+#Entrenar la referencia
+#Aunque las secuencias varian en primers, usare las regiones en las que coinciden 515F y 805R
+#A partir de los primers utilizados en los artículo las secuencias son
+#515F: GTGCCAGCMGCCGCGG
+#805R: GACTACNVGGGTWTCTAAT
+##28 hrs.
+qiime feature-classifier extract-reads --i-sequences ./SILVA_ref/SILVA_seqs.qza --p-f-primer GTGCCAGCMGCCGCGG \
+--p-r-primer GACTACNVGGGTWTCTAAT --p-trunc-len 150 --o-reads ref-seqs.qza
+##20 mins.
+qiime feature-classifier fit-classifier-naive-bayes --i-reference-reads ref-seqs.qza \
+--i-reference-taxonomy ./SILVA_ref/SILVA_taxo.qza --o-classifier classifier.qza
+#Cargar archivos
+#Para ello, cree un archivo de referencia ('se-33-NN-metafile'), tras comprobar que es Phred33
+#Este archive lo hice tres veces segun primers: 341F-805R, 505F-806R y 505F-907R, para trimmear por separado después
+##72 mins
+qiime tools import --type 'SampleData[SequencesWithQuality]' --input-path se-33-341F-805R-manifest \ 
+--output-path se-341F-805R-demux.qza --input-format SingleEndFastqManifestPhred33V2
+##39 mins
+qiime tools import --type 'SampleData[SequencesWithQuality]' --input-path se-33-505F-806R-manifest \
+--output-path se-505F-806R-demux.qza --input-format SingleEndFastqManifestPhred33V2
+##13 mins
+qiime tools import --type 'SampleData[SequencesWithQuality]' --input-path se-33-505F-907R-manifest \
+--output-path se-505F-907R-demux.qza --input-format SingleEndFastqManifestPhred33V2
+#Visulización
+##22 mins
+qiime demux summarize --i-data se-341F-805R-demux.qza --o-visualization demux-summary-341F-805R.qzv
+##17 mins
+qiime demux summarize --i-data se-505F-806R-demux.qza --o-visualization demux-summary-505F-806R.qzv
+##15 mins
+qiime demux summarize --i-data se-505F-907R-demux.qza --o-visualization demux-summary-505F-907R.qzv
+#Trimeo
+##3:45 mins
+qiime dada2 denoise-single --p-trim-left 169 --p-trunc-len 289 --i-demultiplexed-seqs se-341F-805R-demux.qza \
+--o-representative-sequences rep-seqs-341F-805R.qza --o-table table-341F-805R.qza \
+--o-denoising-stats stats-341F-805R.qza
+##4:04 mins
+qiime dada2 denoise-single --p-trim-left 5 --p-trunc-len 125 --i-demultiplexed-seqs se-505F-806R-demux.qza \
+--o-representative-sequences rep-seqs-505F-806R.qza --o-table table-505F-806R.qza \ 
+--o-denoising-stats stats-505F-806R.qza
+##17 mins
+qiime dada2 denoise-single --p-trim-left 5 --p-trunc-len 125 --i-demultiplexed-seqs se-505F-907R-demux.qza \
+--o-representative-sequences rep-seqs-505F-907R.qza --o-table table-505F-907R.qza \ 
+--o-denoising-stats stats-505F-907R.qza
+#Visualizar denoiseo
+##5 mins
+qiime metadata tabulate --m-input-file stats-341F-805R.qza --o-visualization denoising-stats-341F-805R.qzv
+##5 mins
+qiime metadata tabulate --m-input-file stats-505F-806R.qza --o-visualization denoising-stats-505F-806R.qzv
+##5 mins
+qiime metadata tabulate --m-input-file stats-505F-907R.qza --o-visualization denoising-stats-505F-907R.qzv
+#Fusionar datos denoiseados
+##5 mins
+qiime feature-table merge --i-tables table-341F-805R.qza --i-tables table-505F-806R.qza \
+--i-tables table-505F-907R.qza --o-merged-table table.qza
+##5 mins
+qiime feature-table merge-seqs --i-data rep-seqs-341F-805R.qza --i-data rep-seqs-505F-806R.qza \
+--i-data rep-seqs-505F-907R.qza --o-merged-data rep-seqs.qza
+#Exportar y visualizar información
+##10 mins
+qiime tools export --input-path table.qza --output-path asv_table
+##30 segs
+biom convert -i asv_table/feature-table.biom -o asv_table/asv-table.tsv --to-tsv
+##2 mins
+qiime tools export --input-path rep-seqs.qza --output-path asv_table/
+#Crear resumen de secuencias
+##3 mins
+qiime feature-table tabulate-seqs --i-data rep-seqs.qza --o-visualization rep-seqs.qzv
+#Adición de metadata
+#El archivo fue validado usando el complemento Keemei en Google Sheets
+##2 mins
+qiime feature-table summarize --i-table table.qza --o-visualization table.qzv \
+--m-sample-metadata-file metadata.tsv
+#Probar el clasificador
+############################################################################################################
+##10:00 comenzó <-- posponer
+qiime feature-classifier classify-sklearn --i-classifier ../classifier.qza --i-reads rep-seqs.qza \
+--o-classification taxonomy.qza
+############################################################################################################
+#Generar filogenia
+##3 horas
+qiime phylogeny align-to-tree-mafft-fasttree --i-sequences rep-seqs.qza --o-alignment aligned-rep-seqs.qza \
+--o-masked-alignment masked-aligned-rep-seqs.qza --o-tree unrooted-tree.qza --o-rooted-tree rooted-tree.qza
+#Producir estadísticos alfa y beta siguiendo el tutorial 'Moving Pictures' de Qiime2
+##En 'table.qzv' se evidencia un 'salto drástico' entre las cuentas (reducción de aprox. 10x)
+##En SRR8365856 hay 14788 cuentas pero las siguientes tienen a 1830 o menos (muestras SRR146548**)
+##Debido a ello, escogi un número cercano al de SRR83655856 (--p-sampling-depth 14750)
+##Esto implicó excluir a todas las corridas provenientes del trabajo de Mukhtar et al. (2021).
+##8 mins
+qiime diversity core-metrics-phylogenetic --i-phylogeny rooted-tree.qza --i-table table.qza --p-sampling-depth 14750 \
+--m-metadata-file metadata.tsv --output-dir core-metrics-results
+##3 mins
+qiime diversity alpha-group-significance --i-alpha-diversity core-metrics-results/faith_pd_vector.qza \
+--m-metadata-file metadata.tsv --o-visualization core-metrics-results/faith-pd-group-significance.qzv
+##4 mins
+qiime diversity alpha-group-significance --i-alpha-diversity core-metrics-results/evenness_vector.qza \
+--m-metadata-file metadata.tsv --o-visualization core-metrics-results/evenness-group-significance.qzv
+##60 segs
+qiime diversity beta-group-significance \
+--i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza --m-metadata-file metadata.tsv \
+--m-metadata-column Family --o-visualization core-metrics-results/unweighted-unifrac-Family-significance.qzv \
+--p-pairwise
+##60 segs
+qiime diversity beta-group-significance \
+--i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza --m-metadata-file metadata.tsv \
+--m-metadata-column env_feature --o-visualization core-metrics-results/unweighted-unifrac-env-feature-significance.qzv \
+--p-pairwise
+##60 segs
+qiime diversity beta-group-significance \
+--i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza --m-metadata-file metadata.tsv \
+--m-metadata-column Life_trait --o-visualization core-metrics-results/unweighted-unifrac-Life-trait-significance.qzv \
+--p-pairwise
+####PENDIENTE: PCoA, agregar valores ambientales a la metadata
+qiime emperor plot --i-pcoa core-metrics-results/unweighted_unifrac_pcoa_results.qza --m-metadata-file metadata.tsv \
+--p-custom-axes VALOR --o-visualization core-metrics-results/unweighted-unifrac-emperor-VALOR.qzv
+qiime emperor plot --i-pcoa core-metrics-results/bray_curtis_pcoa_results.qza --m-metadata-file metadata.tsv \
+--p-custom-axes VALOR --o-visualization core-metrics-results/bray-curtis-emperor-VALOR.qzv
+#Rarefacción
+#22 mins.
+qiime diversity alpha-rarefaction --i-table table.qza --i-phylogeny rooted-tree.qza --p-max-depth 10000 \
+--m-metadata-file metadata.tsv --o-visualization alpha-rarefaction.qzv
